@@ -1,127 +1,33 @@
-import asyncio
-import json
 import uuid
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-from typing import Dict, List, Tuple
-from fastapi.middleware.cors import CORSMiddleware # <--- IMPORT BARU
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 # Inisialisasi aplikasi FastAPI
 app = FastAPI()
 
-# =====================================================================
-# TAMBAHAN: Konfigurasi CORS
-# =====================================================================
-# Baris-baris ini mengizinkan aplikasi frontend Anda untuk berkomunikasi
-# dengan backend ini. Tanda "*" berarti mengizinkan dari semua sumber.
+# Menambahkan middleware CORS untuk mengizinkan koneksi dari semua sumber
+# Ini penting untuk komunikasi antara Streamlit dan Railway
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Mengizinkan semua asal
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Mengizinkan semua metode (GET, POST, dll.)
-    allow_headers=["*"],  # Mengizinkan semua header
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-# =====================================================================
 
-
+# Endpoint untuk Health Check
+# Ini untuk memastikan Railway tahu aplikasi kita berjalan
 @app.get("/")
-async def root():
-    """Endpoint ini merespons health check dari Railway."""
-    return {"message": "Backend Gunting Batu Kertas is running"}
+def read_root():
+    return {"status": "Backend is healthy and running"}
 
-# Objek untuk mengelola koneksi WebSocket yang aktif
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: Dict[str, List[WebSocket]] = {}
-
-    async def connect(self, websocket: WebSocket, room_id: str):
-        await websocket.accept()
-        if room_id not in self.active_connections:
-            self.active_connections[room_id] = []
-        self.active_connections[room_id].append(websocket)
-
-    def disconnect(self, websocket: WebSocket, room_id: str):
-        if room_id in self.active_connections:
-            self.active_connections[room_id].remove(websocket)
-            if not self.active_connections[room_id]:
-                del self.active_connections[room_id]
-
-    async def broadcast(self, message: str, room_id: str):
-        if room_id in self.active_connections:
-            for connection in self.active_connections[room_id]:
-                await connection.send_text(message)
-
-# Inisialisasi manager koneksi
-manager = ConnectionManager()
-
-# Variabel untuk menyimpan state permainan
-game_state: Dict[str, Dict] = {}
-
-# Fungsi untuk menentukan pemenang
-def determine_winner(move1: str, move2: str) -> str:
-    if move1 == move2:
-        return "draw"
-    rules = {"rock": "scissors", "paper": "rock", "scissors": "paper"}
-    if rules.get(move1) == move2:
-        return "player1"
-    return "player2"
-
-# Endpoint untuk membuat room baru
+# Endpoint untuk membuat room
+# Ini adalah endpoint yang kita tes
 @app.post("/create_room")
-async def create_room():
+def create_room():
+    """Membuat ID room yang unik."""
     room_id = str(uuid.uuid4())[:6]
-    game_state[room_id] = {"moves": {}, "scores": {"player1": 0, "player2": 0}}
+    # Langsung kembalikan room_id dalam format JSON
     return {"room_id": room_id}
 
-# Endpoint untuk mengecek ketersediaan room
-@app.get("/check_room/{room_id}")
-async def check_room(room_id: str):
-    if room_id in manager.active_connections:
-        if len(manager.active_connections[room_id]) >= 2:
-            return {"status": "full"}
-        return {"status": "available"}
-    return {"status": "not_found"}
-
-# Endpoint WebSocket utama untuk gameplay
-@app.websocket("/ws/{room_id}/{player_id}")
-async def websocket_endpoint(websocket: WebSocket, room_id: str, player_id: str):
-    await manager.connect(websocket, room_id)
-    
-    join_message = json.dumps({"type": "player_join", "player_id": player_id})
-    await manager.broadcast(join_message, room_id)
-
-    try:
-        while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
-
-            if message.get("type") == "move":
-                current_moves = game_state.get(room_id, {}).get("moves", {})
-                current_moves[player_id] = message["move"]
-                
-                if len(current_moves) == 2:
-                    p1_id, p1_move = list(current_moves.items())[0]
-                    p2_id, p2_move = list(current_moves.items())[1]
-                    
-                    winner_player = determine_winner(p1_move, p2_move)
-                    
-                    winner_id = None
-                    if winner_player == "player1":
-                        winner_id = p1_id
-                    elif winner_player == "player2":
-                        winner_id = p2_id
-
-                    result_message = json.dumps({
-                        "type": "result",
-                        "winner": winner_id,
-                        "moves": current_moves
-                    })
-                    
-                    await manager.broadcast(result_message, room_id)
-                    
-                    game_state[room_id]["moves"] = {}
-
-    except WebSocketDisconnect:
-        manager.disconnect(websocket, room_id)
-        leave_message = json.dumps({"type": "player_leave", "player_id": player_id})
-        await manager.broadcast(leave_message, room_id)
+# Semua kode WebSocket dan ConnectionManager dihapus sementara untuk tes ini
